@@ -1,0 +1,55 @@
+version: "3.1"
+
+services:
+
+  deleteme_db:
+    container_name: database
+    image: postgres
+    restart: always
+   
+    volumes:
+      - ./postgres:/var/lib/postgresql
+    environment:
+      - POSTGRES_DB=deleteme
+      - POSTGRES_USER=user1
+      - POSTGRES_PASSWORD=password
+    ports:
+      - 5442:5442
+    networks: 
+      - deleteme_botnet
+
+  deleteme_web:
+    container_name: web
+    image: service
+    build: .
+    command: python app.py
+    ports:
+      - 8200:8200
+    restart: always
+    volumes:
+      - .:/src
+    networks: 
+      - deleteme_botnet
+    depends_on:
+      - deleteme_db
+      
+  deleteme_bot:
+    container_name: tbot
+    build: 
+      context: .
+    command: python main.py
+    volumes:
+      - .:/src
+    ports:
+      - 8102:8102
+    depends_on:
+      - deleteme_db
+      - deleteme_web
+    restart: always
+    networks: 
+      - deleteme_botnet
+
+networks: 
+  deleteme_botnet:
+      driver: bridge
+
