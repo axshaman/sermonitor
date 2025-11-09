@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: SERM Monitoring API
+  version: "2.0.0"
+  description: |
+    REST API used by the SERM Monitoring system and the Telegram bot to manage
+    users, keywords and search reports.
+servers:
+  - url: http://localhost:8200/api
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Successful health check
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /register:
+    post:
+      summary: Register a user
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: User already exists
+  /check-user:
+    post:
+      summary: Check whether a user exists
+      operationId: checkUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramIdRequest'
+      responses:
+        '200':
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStatusResponse'
+        '404':
+          description: User not found
+  /check-keywords:
+    get:
+      summary: List keywords for a user
+      operationId: listKeywords
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramIdRequest'
+      responses:
+        '200':
+          description: Keywords returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeywordsResponse'
+        '404':
+          description: User not found
+    post:
+      summary: Add keywords to a user
+      operationId: addKeywords
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeywordMutationRequest'
+      responses:
+        '201':
+          description: Keywords added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeywordMutationResponse'
+        '404':
+          description: User not found
+    delete:
+      summary: Remove keywords from a user
+      operationId: deleteKeywords
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeywordMutationRequest'
+      responses:
+        '200':
+          description: Keywords removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeywordDeleteResponse'
+        '404':
+          description: User not found
+  /search:
+    post:
+      summary: Perform a monitoring search
+      operationId: searchKeywords
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          description: User not found
+  /result:
+    get:
+      summary: Return keywords previously searched
+      operationId: getSearchHistory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramIdRequest'
+      responses:
+        '200':
+          description: Keywords returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeywordsResponse'
+        '404':
+          description: User not found
+  /user-data:
+    get:
+      summary: Fetch a user's profile
+      operationId: getUserProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramIdRequest'
+      responses:
+        '200':
+          description: User returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '404':
+          description: User not found
+  /user:
+    delete:
+      summary: Delete a user
+      operationId: deleteUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramIdRequest'
+      responses:
+        '204':
+          description: User deleted
+        '404':
+          description: User not found
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+    TelegramIdRequest:
+      type: object
+      required:
+        - telegram_id
+      properties:
+        telegram_id:
+          type: string
+          example: "123456"
+    User:
+      type: object
+      required:
+        - name
+        - surname
+        - telegram_id
+        - phone
+        - city
+      properties:
+        name:
+          type: string
+        surname:
+          type: string
+        patronymic:
+          type: string
+        date_of_birth:
+          type: string
+          format: date
+        telegram_id:
+          type: string
+        password:
+          type: string
+        phone:
+          type: string
+        phone2:
+          type: string
+        city:
+          type: string
+        city2:
+          type: string
+        city3:
+          type: string
+        link:
+          type: string
+        link2:
+          type: string
+        link3:
+          type: string
+        link4:
+          type: string
+        link5:
+          type: string
+    UserResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        user:
+          type: object
+    UserStatusResponse:
+      type: object
+      properties:
+        user:
+          type: string
+        details:
+          type: object
+    KeywordMutationRequest:
+      type: object
+      required:
+        - telegram_id
+        - keywords
+      properties:
+        telegram_id:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+    KeywordMutationResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: object
+    KeywordDeleteResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        removed:
+          type: array
+          items:
+            type: string
+    KeywordsResponse:
+      type: object
+      properties:
+        keywords:
+          type: array
+          items:
+            type: string
+    SearchRequest:
+      type: object
+      required:
+        - telegram_id
+      properties:
+        telegram_id:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+        generate_pdf:
+          type: boolean
+          default: false
+    SearchResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        results:
+          type: array
+          items:
+            type: object
+        generated_at:
+          type: string
+          format: date-time
+        pdf_report:
+          type: string
+  responses:
+    ValidationError:
+      description: The request payload is invalid
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                example: validation_error
+              errors:
+                type: object
