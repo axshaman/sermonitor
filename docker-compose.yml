@@ -27,7 +27,7 @@ services:
       - 8200:8200
     restart: always
     volumes:
-      - .:/src
+      - .:/app
     networks: 
       - deleteme_botnet
     depends_on:
@@ -35,11 +35,11 @@ services:
       
   deleteme_bot:
     container_name: tbot
-    build: 
+    build:
       context: .
     command: python main.py
     volumes:
-      - .:/src
+      - .:/app
     ports:
       - 8102:8102
     depends_on:

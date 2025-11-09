@@ -1,146 +1,99 @@
 # SERM Monitoring System
 
-## Overview
+SERM Monitoring System automates the detection of negative mentions about a person or brand within search engine result pages. It combines a REST API, a Telegram bot and PDF report generation to deliver actionable monitoring insights.
 
-SERM Monitoring System is an automated service for monitoring and detecting negative mentions in the top X pages of search engine results. The system helps users track their name or brand presence in online search results and generates detailed reports based on the collected data.
+## What's new
 
-## Features
+- Modernised Flask application factory with a `/health` endpoint.
+- Fully validated REST API with JSON responses and richer error handling.
+- New `/api/search` endpoint that can optionally generate PDF reports on demand.
+- Keyword management now supports create, list and delete operations.
+- Updated dependencies and improved PDF generation.
 
-- **User Registration:** Users register through a Telegram bot.
-- **Keyword Monitoring:** Users specify keywords for tracking.
-- **Automated Search:** The system retrieves search results for specified keywords.
-- **Report Generation:** Results are compiled into a PDF report.
-- **Data Storage:** User information and keywords are stored in a PostgreSQL database.
-- **Containerized Deployment:** The system is fully containerized with Docker.
-
----
-
-## Project Structure
+## Project layout
 
 ```
-SERM-Monitoring/
-│── bot_telegram/             # Telegram bot logic
-│   ├── handlers/             # Message handlers
-│   ├── keyboards/            # Custom keyboards
-│   ├── loader.py             # Bot initialization
-│   ├── config.py             # Configuration file
-│   ├── states.py             # User state management
-│── api/                      # REST API backend
-│   ├── api.py                # Main API endpoints
-│   ├── api_queries.py        # API request handling
-│   ├── services.py           # Helper functions
-│── models/                   # Database models
-│   ├── models.py             # User and keyword models
-│── database/                 # Database-related files
-│── reports/                  # Report generation module
-│   ├── pdf_loader.py         # PDF report creation
-│── migrations/               # Alembic migration scripts
-│── create_advertisement.py   # Ad management module
-│── main.py                   # Telegram bot startup script
-│── app.py                    # Flask API application entry point
-│── docker-compose.yml        # Docker Compose configuration
-│── requirements.txt          # Project dependencies
-│── .env                      # Environment variables configuration
+.
+├── app.py                 # Development entrypoint
+├── api.py                 # REST resources registered under /api
+├── bot_telegram/          # Telegram bot code
+├── models/                # SQLAlchemy models and database setup
+├── pdf_loader.py          # PDF report helpers
+├── reports/               # Generated reports (created at runtime)
+├── services.py            # Service layer shared by the API
+├── xmlproxy.py            # XMLProxy wrapper
+└── docs/
+    ├── architecture.md    # C4 model documentation
+    └── openapi.yaml       # OpenAPI description for the HTTP API
 ```
 
----
+## Requirements
 
-## Technologies Used
+- Python 3.10+
+- PostgreSQL 13+
+- (Optional) Docker & Docker Compose
 
-- **Backend:** Flask, Flask-RESTful, Flask-SQLAlchemy
-- **Database:** PostgreSQL
-- **Bot Framework:** Aiogram
-- **PDF Reports:** ReportLab
-- **Containerization:** Docker, Docker Compose
+All Python dependencies are pinned in [`requirements.txt`](requirements.txt).
 
----
+## Configuration
 
-## Installation & Setup
+| Environment variable | Description | Default |
+| -------------------- | ----------- | ------- |
+| `DATABASE_URL` | SQLAlchemy connection string | `postgresql+psycopg2://pashkan:password@deleteme_db:5432/deleteme` |
+| `XMLPROXY_URL` | Base URL for the XMLProxy search API | `http://xmlproxy.ru/search/` |
 
-### 1. Clone the Repository
+Create a `.env` file (or export the variables) before running the services.
 
-```sh
-git clone https://github.com/axshaman/sermonitor.git
-cd sermonitor
-```
+## Local development
 
-### 2. Install Dependencies
-
-Create a virtual environment and install dependencies:
-
-```sh
-python -m venv venv
-source venv/bin/activate  # For Linux/macOS
-venv\Scripts\activate     # For Windows
-
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows use `.venv\\Scripts\\activate`
 pip install -r requirements.txt
-```
-
-### 3. Configure Environment Variables
-
-Create a `.env` file and add the following parameters:
-
-```env
-POSTGRES_DB=db
-POSTGRES_USER=user
-POSTGRES_PASSWORD=password
-```
-
-### 4. Run with Docker
-
-To start all services using Docker Compose:
-
-```sh
-docker-compose up --build
-```
-
-### 5. Run Manually (Without Docker)
-
-#### 5.1 Start PostgreSQL
-
-Ensure PostgreSQL is installed and running:
-
-```sh
-sudo service postgresql start
-```
-
-Create the database and user:
-
-```sql
-CREATE DATABASE deleteme;
-CREATE USER pashkan WITH PASSWORD 'password';
-GRANT ALL PRIVILEGES ON DATABASE deleteme TO pashkan;
-```
-
-#### 5.2 Start API
-
-```sh
+flask --app app db upgrade  # Make sure the database exists beforehand
 python app.py
 ```
 
-#### 5.3 Start Telegram Bot
+The API will be available at `http://localhost:8200/api`. The Telegram bot can be started separately using `python main.py` once you configure the bot token in `bot_telegram/config.py`.
 
-```sh
-python main.py
+### Docker Compose
+
+The repository includes a `docker-compose.yml` that wires together PostgreSQL and the application container:
+
+```bash
+docker-compose up --build
 ```
 
----
+## REST API
 
-## API Endpoints
+The API is documented in [`docs/openapi.yaml`](docs/openapi.yaml). A short summary of the most important endpoints:
 
-| Method  | URL              | Description |
-|---------|-----------------|-------------|
-| `POST`  | `/register`     | Registers a new user |
-| `POST`  | `/check-user`   | Checks if a user exists |
-| `POST`  | `/check-keywords` | Adds keywords for monitoring |
-| `GET`   | `/check-keywords` | Searches for specified keywords |
-| `GET`   | `/result`       | Retrieves all searched keywords |
-| `GET`   | `/user-data`    | Fetches user data |
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| `POST` | `/api/register` | Register a user sent by the Telegram bot |
+| `POST` | `/api/check-user` | Check whether a Telegram user exists |
+| `POST` | `/api/check-keywords` | Attach keywords to a user |
+| `GET` | `/api/check-keywords` | List keywords for a user |
+| `DELETE` | `/api/check-keywords` | Remove keywords from a user |
+| `POST` | `/api/search` | Perform a monitoring search and optionally generate a PDF |
+| `GET` | `/api/user-data` | Return basic user profile information |
+| `DELETE` | `/api/user` | Remove a user and their associations |
 
----
+## PDF reports
 
-## PDF Report Generation
+The helper in [`pdf_loader.py`](pdf_loader.py) stores generated reports in the `reports/` directory. Reports contain the headline, URL and snippet for each search result returned by the XMLProxy provider.
 
-Reports are generated using `ReportLab`. The `pdf_loader.py` module compiles search results into structured PDF documents containing URLs and relevant snippets.
+## Architecture
 
----
+A C4 model describing the system and the interactions between the API, the Telegram bot, the database and external services is available in [`docs/architecture.md`](docs/architecture.md).
+
+## Contributing
+
+1. Fork the repository and create a feature branch.
+2. Install dependencies and configure the environment variables.
+3. Add tests or scripts when adding new features.
+4. Submit a pull request.
+
+## License
+
+This project is released under the MIT License.

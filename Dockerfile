@@ -1,9 +1,12 @@
-FROM python:3.9
+FROM python:3.11-slim
 
-WORKDIR /src
+WORKDIR /app
 
-COPY requirements.txt /src/
-RUN pip install -r requirements.txt
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
 # RUN apt-get update
 # RUN apt-get -y install build-essential && apt-get -y install apt-utils
 
@@ -12,5 +15,5 @@ RUN pip install -r requirements.txt
 
 # RUN pip3 install Cython
 
-COPY . /src/
+COPY . /app/
 # CMD ["/bin/bash", "/usr/local/bin/docker-entrypoint.sh"]

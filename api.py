@@ -1,180 +1,244 @@
-import json, datetime
-from flask_restful import Resource
+"""REST API resources for the SERM Monitoring platform."""
+from __future__ import annotations
+
+import datetime as dt
+from http import HTTPStatus
+from typing import Any, Dict
+
 from flask import request
-from models.models import Users, KeyWords
-from models.models import db
-from xmlproxy import get_urls
-from pdf_loader import pdf_report
-from services import get_keywords_from_database
-now = datetime.date.today()
+from flask_restful import Api, Resource
+from marshmallow import Schema, ValidationError, fields, validate
+from requests.exceptions import HTTPError
+
+from models.models import Users, db
+from pdf_loader import generate_pdf_report
+from services import (
+    add_keywords_to_user,
+    delete_user_keywords,
+    get_keywords_for_user,
+    perform_search,
+)
+
+api = Api(prefix="/api")
+
+
+class UserSchema(Schema):
+    name = fields.Str(required=True, validate=validate.Length(min=1, max=50))
+    surname = fields.Str(required=True, validate=validate.Length(min=1, max=50))
+    patronymic = fields.Str(load_default=None, validate=validate.Length(max=50))
+    date_of_birth = fields.Date(load_default=None)
+    telegram_id = fields.Str(required=True, validate=validate.Length(min=1, max=64))
+    password = fields.Str(load_default=None, validate=validate.Length(max=255))
+    phone = fields.Str(required=True, validate=validate.Length(min=5, max=16))
+    phone2 = fields.Str(load_default=None, validate=validate.Length(max=16))
+    city = fields.Str(required=True, validate=validate.Length(min=1, max=30))
+    city2 = fields.Str(load_default=None, validate=validate.Length(max=30))
+    city3 = fields.Str(load_default=None, validate=validate.Length(max=30))
+    link = fields.Str(load_default=None, validate=validate.Length(max=200))
+    link2 = fields.Str(load_default=None, validate=validate.Length(max=200))
+    link3 = fields.Str(load_default=None, validate=validate.Length(max=200))
+    link4 = fields.Str(load_default=None, validate=validate.Length(max=200))
+    link5 = fields.Str(load_default=None, validate=validate.Length(max=200))
+
+
+class KeywordSchema(Schema):
+    telegram_id = fields.Str(required=True, validate=validate.Length(min=1, max=64))
+    keywords = fields.List(
+        fields.Str(validate=validate.Length(min=1, max=50)),
+        required=True,
+        validate=validate.Length(min=1),
+    )
+
+
+class SearchSchema(Schema):
+    telegram_id = fields.Str(required=True, validate=validate.Length(min=1, max=64))
+    keywords = fields.List(
+        fields.Str(validate=validate.Length(min=1, max=50)),
+        required=False,
+        load_default=list,
+    )
+    generate_pdf = fields.Bool(load_default=False)
+
+
+user_schema = UserSchema()
+keyword_schema = KeywordSchema()
+search_schema = SearchSchema()
 
 
 class UserRegister(Resource):
+    """Register a new user coming from the Telegram bot."""
 
-    """Принимает данные нового пользователя с телеграм бота и добавляет в базу данных"""
-    def post(self):
-        data = request.get_json()
-        print(data)
+    def post(self) -> tuple[Dict[str, Any], int]:
         try:
-            user = Users(**data)
-            user.save_to_db()
-            return {'status': 'ok'}, 200
-        except:
-            return {'status': 'fail'}, 400
+            payload = user_schema.load(request.get_json(force=True))
+        except ValidationError as exc:
+            return {"status": "validation_error", "errors": exc.messages}, HTTPStatus.BAD_REQUEST
+
+        if Users.find_by_telegram_id(payload["telegram_id"]):
+            return {"status": "duplicate", "message": "User already exists."}, HTTPStatus.CONFLICT
+
+        user = Users(**payload)
+        user.save()
+        return {"status": "ok", "user": user.to_dict()}, HTTPStatus.CREATED
 
 
 class CheckUser(Resource):
+    """Check whether a user exists."""
 
-    """Проверяет есть ли пользователь в базе данных"""
     def post(self):
-        telegram_id = request.get_json()['telegram_id']
+        telegram_id = request.get_json(force=True).get("telegram_id")
+        if not telegram_id:
+            return {"status": "validation_error", "message": "telegram_id is required"}, HTTPStatus.BAD_REQUEST
+
         user = Users.find_by_telegram_id(telegram_id)
         if user:
-            message = {'user': 'authorized'}
-            return message
-        else:
-            message = {'user': 'unauthorized'}
-            return message
+            return {"user": "authorized", "details": user.to_dict()}, HTTPStatus.OK
+        return {"user": "unauthorized"}, HTTPStatus.NOT_FOUND
 
 
 class CheckKeyWords(Resource):
+    """Manage keywords associated with a user."""
 
-    """Принимает ключевые слова для поиска, проверяет есть ли они в базе данных и связывает их с пользователем """
     def post(self):
         try:
-            data = request.get_json()
-            key_words = data['key_words']
-            telegram_id = data['telegram_id']
-        except KeyError:
-            return {'status': 'data is out'}, 401
-        try:
-            user = Users.find_by_telegram_id(telegram_id=telegram_id)
-            if not user:
-                return {'status': 'user does not exist'}, 501
-            words = key_words.lower().split(',')
-            for name in words:
-                word = KeyWords(name=name)
-                user.word_user.append(word)
-                user.save_to_db()
-            return {'status':'done'}, 200
-        except:
-            return {'status': 'fail'}, 402
+            payload = keyword_schema.load(request.get_json(force=True))
+        except ValidationError as exc:
+            return {"status": "validation_error", "errors": exc.messages}, HTTPStatus.BAD_REQUEST
 
-    """Делает запрос с параметрами на яндекс и возвращает пдф с отчетом"""
+        user = Users.find_by_telegram_id(payload["telegram_id"])
+        if not user:
+            return {"status": "user_not_found"}, HTTPStatus.NOT_FOUND
+
+        added = add_keywords_to_user(user, payload["keywords"])
+        return {
+            "status": "ok",
+            "keywords": [kw.to_dict() for kw in added],
+        }, HTTPStatus.CREATED
+
     def get(self):
         try:
-            data = request.get_json()
-            print(f'{data} data')
-            key_words = data['key_words']
-            telegram_id = data['telegram_id']
-        except KeyError:
-            return {'status': 'data is out'}, 401
-        user = Users.find_by_telegram_id(telegram_id=telegram_id)
+            payload = search_schema.load(request.get_json(force=True))
+        except ValidationError as exc:
+            return {"status": "validation_error", "errors": exc.messages}, HTTPStatus.BAD_REQUEST
+
+        user = Users.find_by_telegram_id(payload["telegram_id"])
         if not user:
-            return {'status': 'user does not exist'}, 400
-        user_patronymic = user.patronymic
-        words = key_words.lower().split(',')
-        object = []
-        # for word in words:
-        query=f'{user_name} {user_surname} {user_patronymic} {user_city} {words[-1]}'
+            return {"status": "user_not_found"}, HTTPStatus.NOT_FOUND
 
-        try:  
-            result = get_urls(query=query)
-        except Exception:
-            print('nooo')
-            return {'status': 'Error'}, 400
-
-        result = get_urls(query=query)
-
-        try:
-            js = json.loads(result)['yandexsearch']['response']["results"]["grouping"]["group"]
-        except:
-            return False
-        c=1
-        for i in js:
-            elem = {}
-            url = i["doc"]["url"]
-            if "passages" in i["doc"].keys():
-                keys = i["doc"]["passages"]['passage']
-                try:
-                    name = keys["hlword"]
-                    snippet = keys["#text"]
-                except:
-                    name = keys[0]["hlword"]
-                    snippet = keys[0]["#text"]
-            elif "headline" in i["doc"].keys():                     
-                keys = i["doc"]["headline"]
-                if type(keys) == dict:
-                    name = keys["hlword"]
-                    snippet = keys["#text"]
-                elif type(keys) == str:
-                    name = words[-1]
-                    snippet = keys
-            elem['id'] = c
-            elem['url'] = url
-            elem['snippet'] = snippet
-            elem['name'] = name
-            object.append(elem)
-            c+=1
-        name=f'{user_name} {user_patronymic} {user_surname} от {now}'
-
-        print(object)
-        
-        try:
-            with open('src/', f'{name}.json', 'w', encoding='utf-8') as f:
-                json.dump(object, f, sort_keys=True, indent=4, ensure_ascii=False)
-        except:
-            print(34334)
-            return False
-        try:
-            pdf_report(object, name=f'{user_name} {user_patronymic} {user_surname} от {now}')
-        except Exception:
-            print(56565)
-            return False
-        return {'status':'done'}, 200
- 
-
+        keywords = get_keywords_for_user(user)
+        return {"keywords": keywords}, HTTPStatus.OK
 
     def delete(self):
         try:
-            data = request.get_json()
-            telegram_id = data['telegram_id']
-        except KeyError:
-            return {'status': 'data is out'}, 401
-        user = Users.find_by_telegram_id(telegram_id=telegram_id)
-        words = [i for i in user.word_user]
-        if words:
-            for word in words:
-                user.word_user.remove(word)
-                user.save_to_db()
-        return {'status':'done'}, 200
+            payload = keyword_schema.load(request.get_json(force=True))
+        except ValidationError as exc:
+            return {"status": "validation_error", "errors": exc.messages}, HTTPStatus.BAD_REQUEST
+
+        user = Users.find_by_telegram_id(payload["telegram_id"])
+        if not user:
+            return {"status": "user_not_found"}, HTTPStatus.NOT_FOUND
+
+        removed = delete_user_keywords(user, payload["keywords"])
+        return {"status": "ok", "removed": removed}, HTTPStatus.OK
+
+
+class Search(Resource):
+    """Perform a monitoring search and optionally generate a PDF report."""
+
+    def post(self):
+        try:
+            payload = search_schema.load(request.get_json(force=True))
+        except ValidationError as exc:
+            return {"status": "validation_error", "errors": exc.messages}, HTTPStatus.BAD_REQUEST
+
+        user = Users.find_by_telegram_id(payload["telegram_id"])
+        if not user:
+            return {"status": "user_not_found"}, HTTPStatus.NOT_FOUND
+
+        keywords = payload["keywords"] or get_keywords_for_user(user)
+        if not keywords:
+            return {"status": "no_keywords", "message": "No keywords available"}, HTTPStatus.BAD_REQUEST
+
+        query = " ".join(filter(None, [user.name, user.surname, user.patronymic or ""]))
+        try:
+            results = perform_search(query, keywords)
+        except HTTPError as exc:
+            return {
+                "status": "search_error",
+                "message": str(exc),
+            }, HTTPStatus.BAD_GATEWAY
+
+        if payload["generate_pdf"]:
+            filename = generate_pdf_report(user, results)
+        else:
+            filename = None
+
+        response = {
+            "status": "ok",
+            "results": results,
+            "generated_at": dt.datetime.utcnow().isoformat() + "Z",
+        }
+        if filename:
+            response["pdf_report"] = filename
+        return response, HTTPStatus.OK
+
 
 class Result(Resource):
-
-    """Возвращает пользователю все ключевые слова по которым он делал запрос"""
-    def get(self):
-        data = request.get_json()
-        telegram_id = data['telegram_id']
-        kwords = get_keywords_from_database(telegram_id)
-        return kwords
-
-        
-class UserData(Resource):
+    """Return keywords that were used for previous searches."""
 
     def get(self):
-        data = request.get_json()
-        print(data)
-        telegram_id = data['telegram_id']
-        user = Users.find_by_telegram_id(telegram_id=telegram_id)
+        payload = request.get_json(force=True) or {}
+        telegram_id = payload.get("telegram_id")
+        if not telegram_id:
+            return {"status": "validation_error", "message": "telegram_id is required"}, HTTPStatus.BAD_REQUEST
+
+        user = Users.find_by_telegram_id(telegram_id)
         if not user:
-            print(user)
-            return {'status': 'user does not exist'}, 500
-        user_name = user.name
-        user_surname = user.surname
-        user_patronymic = user.patronymic
-        data = {
-            'name': user_name,
-            'surname': user_surname,
-            'patronymic': user_patronymic,
-        }
-        return json.dumps(data), 200
+            return {"status": "user_not_found"}, HTTPStatus.NOT_FOUND
+
+        return {"keywords": get_keywords_for_user(user)}, HTTPStatus.OK
+
+
+class UserData(Resource):
+    """Return the profile data for a user."""
+
+    def get(self):
+        payload = request.get_json(force=True) or {}
+        telegram_id = payload.get("telegram_id")
+        if not telegram_id:
+            return {"status": "validation_error", "message": "telegram_id is required"}, HTTPStatus.BAD_REQUEST
+
+        user = Users.find_by_telegram_id(telegram_id)
+        if not user:
+            return {"status": "user_not_found"}, HTTPStatus.NOT_FOUND
+
+        return {"user": user.to_dict()}, HTTPStatus.OK
+
+
+class UserDelete(Resource):
+    """Remove a user and detach associated keywords."""
+
+    def delete(self):
+        payload = request.get_json(force=True) or {}
+        telegram_id = payload.get("telegram_id")
+        if not telegram_id:
+            return {"status": "validation_error", "message": "telegram_id is required"}, HTTPStatus.BAD_REQUEST
+
+        user = Users.find_by_telegram_id(telegram_id)
+        if not user:
+            return {"status": "user_not_found"}, HTTPStatus.NOT_FOUND
+
+        db.session.delete(user)
+        db.session.commit()
+        return {"status": "ok"}, HTTPStatus.OK
+
+
+def register_resources(app):
+    api.add_resource(UserRegister, "/register")
+    api.add_resource(CheckUser, "/check-user")
+    api.add_resource(CheckKeyWords, "/check-keywords")
+    api.add_resource(Search, "/search")
+    api.add_resource(Result, "/result")
+    api.add_resource(UserData, "/user-data")
+    api.add_resource(UserDelete, "/user")
+    api.init_app(app)
